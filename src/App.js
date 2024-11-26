@@ -43,7 +43,7 @@ function App() {
     };
   }, []);
 
-  useEffect(() => {
+  useEffect(()  => {
     // 초기 캔버스 데이터 가져오기
     fetch('http://localhost:8080/api/canvas')
       .then((response) => response.json())
@@ -53,7 +53,6 @@ function App() {
 
   const handleCellClick = (x, y) => {
     const pixelDTO = { x, y, color: selectedColor };
-
     // 서버에 픽셀 업데이트 요청
     fetch('http://localhost:8080/api/pixel', {
       method: 'POST',
@@ -62,16 +61,7 @@ function App() {
     })
       .then((response) => response.json())
       .then((data) => {
-        setCanvasData((prevData) => {
-          const updatedData = [...prevData];
-          const index = updatedData.findIndex((p) => p.x === data.x && p.y === data.y);
-          if (index !== -1) {
-            updatedData[index] = data; // 업데이트된 픽셀
-          } else {
-            updatedData.push(data); // 새로운 픽셀 추가
-          }
-          return updatedData;
-        });
+        console.log(`픽셀 업데이트 ${x}, ${y}`);
       })
       .catch((error) => console.error('Error updating pixel:', error));
   };

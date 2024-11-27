@@ -93,6 +93,18 @@ function App() {
             chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
           }
         });
+
+        // 채팅 구독 추가
+        client.subscribe('/topic/chat', (message) => {
+          const chatMessage = JSON.parse(message.body);
+          console.log(chatMessage);
+          setMessages(prev => [...prev, chatMessage]);
+          // 새 메시지가 오면 스크롤을 아래로
+          if (chatContainerRef.current) {
+            chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+          }
+        });
+
       },
     });
 
@@ -101,6 +113,7 @@ function App() {
 
     return () => {
       client.deactivate();
+      clientRef.current = null;
     };
   }, []);
 

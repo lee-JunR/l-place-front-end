@@ -15,6 +15,9 @@ function App() {
   const chatContainerRef = useRef(null);
   const clientRef = useRef(null);
 
+  // 커서 관련
+  const [cursors, setCursors] = useState({});
+
   useEffect(() => {
     // WebSocket 설정
     const client = new Client({
@@ -48,6 +51,14 @@ function App() {
           }
         });
 
+        // 커서 위치 구독 추가
+        client.subscribe('/topic/cursors', (message) => {
+          const cursorData = JSON.parse(message.body);
+          setCursors(prev => ({
+            ...prev,
+            [cursorData.username]: { x: cursorData.x, y: cursorData.y }
+          }));
+        });
       },
       onError: (error) => {
         setIsConnected(false);
@@ -105,6 +116,25 @@ function App() {
 
     setInputMessage('');
   };
+
+  // 마우스 이벤트 핸들러 추가
+  const handleMouseMove = (e) => {
+    if (!username || !clientRef.current) return;
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    clientRef.current.publish({
+      destination: '/app/cursors',
+      body: JSON.stringify({
+        username: username,
+        x: x,
+        y: y
+      })
+    });
+  };
+
   return (
     <div className="app-container">
       <h1>l/place</h1>
@@ -118,7 +148,11 @@ function App() {
               onChange={(e) => setSelectedColor(e.target.value)}
             />
           </div>
-          <div className="grid">
+          <div 
+            className="grid"
+            onMouseMove={handleMouseMove}
+            style={{ position: 'relative' }}
+          >
             {Array.from({ length: 20 }).map((_, rowIndex) =>
               Array.from({ length: 20 }).map((_, colIndex) => {
                 const pixel = canvasData.find((p) => p.x === colIndex && p.y === rowIndex);
@@ -132,6 +166,25 @@ function App() {
                 );
               })
             )}
+            
+            {/* 커서 표시 */}
+            {Object.entries(cursors).map(([user, pos]) => (
+              username !== user && (
+                <div
+                  key={user}
+                  className="cursor"
+                  style={{
+                    position: 'absolute',
+                    left: `${pos.x}px`,
+                    top: `${pos.y}px`,
+                    pointerEvents: 'none'
+                  }}
+                >
+                  <div className="cursor-pointer" />
+                  <span className="cursor-username">{user}</span>
+                </div>
+              )
+            ))}
           </div>
           {!isConnected && <p>WebSocket 연결 실패</p>}
         </div>

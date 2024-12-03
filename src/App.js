@@ -4,37 +4,94 @@ import { Client } from '@stomp/stompjs';
 import './App.css';
 
 function App() {
-  const [canvasData, setCanvasData] = useState([]);
-  const [selectedColor, setSelectedColor] = useState('#ff0000');
-  const [isConnected, setIsConnected] = useState(false);
+  const CANVAS_SIZE = 256; // 캔버스 크기
+  const CELL_SIZE = 16; // 셀 크기
+  const PADDING = 20; // 패딩 영역 추가
 
-  // 채팅 관련
+  const [canvasData, setCanvasData] = useState(
+    Array.from({ length: CANVAS_SIZE }, () => Array(CANVAS_SIZE).fill(null))
+  );
+  const [selectedColor, setSelectedColor] = useState('#ff0000');
+  const [viewport, setViewport] = useState({
+    x: CANVAS_SIZE / 2 - CANVAS_SIZE / 4, // 초기 x 좌표
+    y: CANVAS_SIZE / 2 - CANVAS_SIZE / 4, // 초기 y 좌표
+    zoom: 2, // 초기 줌 레벨 (기본 확대된 상태)
+  });
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
   const [username, setUsername] = useState('');
+  const [isChatVisible, setIsChatVisible] = useState(true);
+
+  const canvasRef = useRef(null);
   const chatContainerRef = useRef(null);
   const clientRef = useRef(null);
+  const isDragging = useRef(false);
+  const dragStart = useRef({ x: 0, y: 0 });
+
+  // 초기 데이터 가져오기
+  const fetchCanvasData = async () => {
+    try {
+      const response = await fetch('http://localhost:8080/api/canvas');
+      const data = await response.json();
+
+      const initialCanvas = Array.from({ length: CANVAS_SIZE }, () =>
+        Array(CANVAS_SIZE).fill(null)
+      );
+      data.forEach(({ x, y, color }) => {
+        initialCanvas[y][x] = { x, y, color };
+      });
+
+      setCanvasData(initialCanvas);
+    } catch (error) {
+      console.error('캔버스 데이터 가져오기 오류:', error);
+    }
+  };
 
   useEffect(() => {
-    // WebSocket 설정
+    fetchCanvasData();
+
+    // 캔버스 정 중앙에서 시작
+    const initialZoom = 2;
+    const visibleCells = CANVAS_SIZE / initialZoom;
+    setViewport({
+      x: CANVAS_SIZE / 2 - visibleCells / 2,
+      y: CANVAS_SIZE / 2 - visibleCells / 2,
+      zoom: initialZoom,
+    });
+  }, []);
+
+  // WebSocket 설정
+  useEffect(() => {
     const client = new Client({
-      webSocketFactory: () => new SockJS('http://localhost:8080/ws'), // WebSocket 엔드포인트
-      reconnectDelay: 5000, // 연결 실패 시 5초 후 재시도
+      webSocketFactory: () => new SockJS('http://localhost:8080/ws'),
+      reconnectDelay: 5000,
       onConnect: () => {
-        setIsConnected(true);
-        console.log('WebSocket 연결 성공');
         client.subscribe('/topic/canvas', (message) => {
-          const pixel = JSON.parse(message.body);
-          setCanvasData((prevData) => {
-            const updatedData = [...prevData];
-            const index = updatedData.findIndex((p) => p.x === pixel.x && p.y === pixel.y);
-            if (index !== -1) {
-              updatedData[index] = pixel; // 이미 있는 픽셀 업데이트
-            } else {
-              updatedData.push(pixel); // 새로운 픽셀 추가
-            }
-            return updatedData;
-          });
+          const parsedMessage = JSON.parse(message.body);
+          if (parsedMessage.updates && Array.isArray(parsedMessage.updates)) {
+            setCanvasData((prevCanvas) => {
+              const newCanvas = [...prevCanvas];
+              parsedMessage.updates.forEach(({ x, y, color }) => {
+                newCanvas[y][x] = { x, y, color };
+              });
+              return newCanvas;
+            });
+          } else if (parsedMessage.x !== undefined && parsedMessage.y !== undefined) {
+            const { x, y, color } = parsedMessage;
+            setCanvasData((prevCanvas) => {
+              const newCanvas = [...prevCanvas];
+              newCanvas[y][x] = { x, y, color };
+              return newCanvas;
+            });
+          }
+        });
+
+        client.subscribe('/topic/chat', (message) => {
+          const chatMessage = JSON.parse(message.body);
+          setMessages((prev) => [...prev, chatMessage]);
+          if (chatContainerRef.current) {
+            chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+          }
         });
 
         // 채팅 구독 추가
@@ -49,13 +106,9 @@ function App() {
         });
 
       },
-      onError: (error) => {
-        setIsConnected(false);
-        console.error('WebSocket 연결 실패:', error);
-      },
     });
 
-    clientRef.current = client;  // ref에 client 저장
+    clientRef.current = client;
     client.activate();
 
     return () => {
@@ -64,119 +117,172 @@ function App() {
     };
   }, []);
 
-  useEffect(() => {
-    // 초기 캔버스 데이터 가져오기
-    fetch('http://localhost:8080/api/canvas')
-      .then((response) => response.json())
-      .then((data) => setCanvasData(data))
-      .catch((error) => console.error('Error fetching canvas data:', error));
-  }, []);
+  // 캔버스 렌더링
+  const renderCanvas = () => {
+    const canvas = canvasRef.current;
+    const context = canvas.getContext('2d');
 
-  const handleCellClick = (x, y) => {
-    const pixelDTO = { x, y, color: selectedColor };
+    if (!context) return;
 
-    // 서버에 픽셀 업데이트 요청
-    fetch('http://localhost:8080/api/pixel', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(pixelDTO),
-    })
-      .then((response) => response.json())
-      .then((data) => {
-        setCanvasData((prevData) => {
-          const updatedData = [...prevData];
-          const index = updatedData.findIndex((p) => p.x === data.x && p.y === data.y);
-          if (index !== -1) {
-            updatedData[index] = data; // 업데이트된 픽셀
-          } else {
-            updatedData.push(data); // 새로운 픽셀 추가
-          }
-          return updatedData;
-        });
-      })
-      .catch((error) => console.error('Error updating pixel:', error));
+    context.clearRect(0, 0, canvas.width, canvas.height);
+
+    const scaledCellSize = CELL_SIZE / viewport.zoom;
+
+    for (let y = -PADDING; y < CANVAS_SIZE + PADDING; y++) {
+      for (let x = -PADDING; x < CANVAS_SIZE + PADDING; x++) {
+        const pixel = canvasData[y]?.[x];
+        context.fillStyle = pixel?.color || '#ffffff';
+        context.fillRect(
+          (x - viewport.x) * scaledCellSize,
+          (y - viewport.y) * scaledCellSize,
+          scaledCellSize,
+          scaledCellSize
+        );
+      }
+    }
   };
 
-   // 채팅 메시지 전송 핸들러
-   const handleSendMessage = (e) => {
+  useEffect(() => {
+    renderCanvas();
+  }, [canvasData, viewport]);
+
+  const handleMouseDown = (e) => {
+    isDragging.current = true;
+    dragStart.current = { x: e.clientX, y: e.clientY };
+  };
+
+  const handleMouseMove = (e) => {
+    if (!isDragging.current) return;
+
+    const dx = (dragStart.current.x - e.clientX) / CELL_SIZE / viewport.zoom;
+    const dy = (dragStart.current.y - e.clientY) / CELL_SIZE / viewport.zoom;
+
+    setViewport((prev) => ({
+      ...prev,
+      x: Math.max(-PADDING, Math.min(CANVAS_SIZE - CANVAS_SIZE / prev.zoom + PADDING, prev.x + dx)),
+      y: Math.max(-PADDING, Math.min(CANVAS_SIZE - CANVAS_SIZE / prev.zoom + PADDING, prev.y + dy)),
+    }));
+
+    dragStart.current = { x: e.clientX, y: e.clientY };
+  };
+
+  const handleMouseUp = () => {
+    isDragging.current = false;
+  };
+
+  const handleWheel = (e) => {
+    e.preventDefault();
+    const zoomFactor = e.deltaY > 0 ? 0.8 : 1.2; // 스크롤 업/다운으로 줌 인/아웃
+    setViewport((prev) => {
+      const newZoom = Math.max(1, Math.min(4, prev.zoom * zoomFactor)); // 줌 레벨 제한
+      const scaledWidth = CANVAS_SIZE / newZoom;
+      const scaledHeight = CANVAS_SIZE / newZoom;
+
+      // 마우스 위치를 기준으로 뷰포트 재조정
+      const mouseX = e.clientX / CELL_SIZE;
+      const mouseY = e.clientY / CELL_SIZE;
+
+      const newX = Math.max(
+        -PADDING,
+        Math.min(CANVAS_SIZE - scaledWidth + PADDING, prev.x + (mouseX / prev.zoom - mouseX / newZoom))
+      );
+      const newY = Math.max(
+        -PADDING,
+        Math.min(CANVAS_SIZE - scaledHeight + PADDING, prev.y + (mouseY / prev.zoom - mouseY / newZoom))
+      );
+
+      return {
+        ...prev,
+        zoom: newZoom,
+        x: newX,
+        y: newY,
+      };
+    });
+  };
+
+  const toggleChat = () => setIsChatVisible(!isChatVisible);
+
+  const handleCanvasClick = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const scaledCellSize = CELL_SIZE / viewport.zoom;
+
+    const clickedX = Math.floor((e.clientX - rect.left) / scaledCellSize + viewport.x);
+    const clickedY = Math.floor((e.clientY - rect.top) / scaledCellSize + viewport.y);
+
+    if (clickedX >= 0 && clickedX < CANVAS_SIZE && clickedY >= 0 && clickedY < CANVAS_SIZE) {
+      const pixelDTO = { x: clickedX, y: clickedY, color: selectedColor };
+      fetch('http://localhost:8080/api/pixel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(pixelDTO),
+      }).then(() => {
+        setCanvasData((prevCanvas) => {
+          const newCanvas = [...prevCanvas];
+          newCanvas[clickedY][clickedX] = { x: clickedX, y: clickedX, color: selectedColor };
+          return newCanvas;
+        });
+      });
+    }
+  };
+
+  const handleSendMessage = (e) => {
     e.preventDefault();
     if (!inputMessage.trim() || !username.trim()) return;
 
-    const message = {
-      sender: username,
-      content: inputMessage,
-      timestamp: null // 서버에서 설정됨
-    };
-
+    const message = { sender: username, content: inputMessage, timestamp: Date.now() };
     clientRef.current.publish({
       destination: '/app/chat/send',
-      body: JSON.stringify(message)
+      body: JSON.stringify(message),
     });
-
     setInputMessage('');
   };
-  return (
-    <div className="app-container">
-      <h1>l/place</h1>
-      <div className="main-content">
-        <div className="canvas-section">
-          <div>
-            <label>Select Color: </label>
-            <input
-              type="color"
-              value={selectedColor}
-              onChange={(e) => setSelectedColor(e.target.value)}
-            />
-          </div>
-          <div className="grid">
-            {Array.from({ length: 20 }).map((_, rowIndex) =>
-              Array.from({ length: 20 }).map((_, colIndex) => {
-                const pixel = canvasData.find((p) => p.x === colIndex && p.y === rowIndex);
-                return (
-                  <div
-                    key={`${rowIndex}-${colIndex}`}
-                    className="cell"
-                    style={{ backgroundColor: pixel ? pixel.color : '#fff' }}
-                    onClick={() => handleCellClick(colIndex, rowIndex)}
-                  />
-                );
-              })
-            )}
-          </div>
-          {!isConnected && <p>WebSocket 연결 실패</p>}
-        </div>
 
+  return (
+    <div
+      className="app-container"
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onWheel={handleWheel}
+    >
+      <canvas
+        ref={canvasRef}
+        width={window.innerWidth}
+        height={window.innerHeight}
+        className="canvas"
+        onClick={handleCanvasClick}
+      />
+      <button className="toggle-chat" onClick={toggleChat}>
+        {isChatVisible ? 'Hide Chat' : 'Show Chat'}
+      </button>
+      {isChatVisible && (
         <div className="chat-section">
-          <div className="username-input">
-            <input
-              type="text"
-              placeholder="사용자 이름을 입력하세요"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-            />
-          </div>
+          <input
+            type="text"
+            placeholder="사용자 이름"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+          />
           <div className="chat-messages" ref={chatContainerRef}>
             {messages.map((msg, index) => (
               <div key={index} className="message">
                 <span className="sender">{msg.sender}: </span>
                 <span className="content">{msg.content}</span>
-                <span className="timestamp">
-                  {`${new Date(msg.timestamp).getHours()}시${new Date(msg.timestamp).getMinutes()}분`}
-                </span>
               </div>
             ))}
           </div>
-          <form onSubmit={handleSendMessage} className="chat-input-form">
+          <form onSubmit={handleSendMessage}>
             <input
               type="text"
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
-              placeholder="메시지를 입력하세요"
+              placeholder="메시지 입력"
             />
             <button type="submit">전송</button>
           </form>
         </div>
-      </div>
+      )}
     </div>
   );
 }

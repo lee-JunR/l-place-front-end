@@ -117,10 +117,6 @@ function App() {
           }));
         });
       },
-      onError: (error) => {
-        setIsConnected(false);
-        console.error('WebSocket 연결 실패:', error);
-      },
     });
 
     clientRef.current = client;
@@ -167,6 +163,21 @@ function App() {
   };
 
   const handleMouseMove = (e) => {
+    if (!username || !clientRef.current) return;
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    clientRef.current.publish({
+      destination: '/app/cursors',
+      body: JSON.stringify({
+        username: username,
+        x: x,
+        y: y
+      })
+    });
+
     if (!isDragging.current) return;
 
     const dx = (dragStart.current.x - e.clientX) / CELL_SIZE / viewport.zoom;
@@ -253,23 +264,6 @@ function App() {
     setInputMessage('');
   };
 
-  // 마우스 이벤트 핸들러 추가
-  const handleMouseMove = (e) => {
-    if (!username || !clientRef.current) return;
-
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    clientRef.current.publish({
-      destination: '/app/cursors',
-      body: JSON.stringify({
-        username: username,
-        x: x,
-        y: y
-      })
-    });
-  };
 
   return (
     <div

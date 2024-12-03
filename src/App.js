@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import SockJS from 'sockjs-client';
 import { Client } from '@stomp/stompjs';
+import { getRandomNickname } from '@woowa-babble/random-nickname';
 import './App.css';
 
 function App() {
@@ -12,6 +13,7 @@ function App() {
     Array.from({ length: CANVAS_SIZE }, () => Array(CANVAS_SIZE).fill(null))
   );
   const [selectedColor, setSelectedColor] = useState('#ff0000');
+
   const [viewport, setViewport] = useState({
     x: CANVAS_SIZE / 2 - CANVAS_SIZE / 4, // 초기 x 좌표
     y: CANVAS_SIZE / 2 - CANVAS_SIZE / 4, // 초기 y 좌표
@@ -19,7 +21,7 @@ function App() {
   });
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
-  const [username, setUsername] = useState('');
+  const usernameRef = useRef('');
   const [isChatVisible, setIsChatVisible] = useState(true);
 
   const canvasRef = useRef(null);
@@ -30,6 +32,9 @@ function App() {
   const [cursors, setCursors] = useState({});
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
+
+  const type = 'animals'; // animals, heroes, characters, monsters
+
 
   // 초기 데이터 가져오기
   const fetchCanvasData = async () => {
@@ -53,6 +58,7 @@ function App() {
   useEffect(() => {
     fetchCanvasData();
 
+    usernameRef.current = getRandomNickname(type);
     // 캔버스 정 중앙에서 시작
     const initialZoom = 2;
     const visibleCells = CANVAS_SIZE / initialZoom;
@@ -97,17 +103,6 @@ function App() {
           }
         });
 
-        // 채팅 구독 추가
-        client.subscribe('/topic/chat', (message) => {
-          const chatMessage = JSON.parse(message.body);
-          console.log(chatMessage);
-          setMessages(prev => [...prev, chatMessage]);
-          // 새 메시지가 오면 스크롤을 아래로
-          if (chatContainerRef.current) {
-            chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-          }
-        });
-
         // 커서 위치 구독 추가
         client.subscribe('/topic/cursors', (message) => {
           const cursorData = JSON.parse(message.body);
@@ -116,15 +111,42 @@ function App() {
             [cursorData.username]: { x: cursorData.x, y: cursorData.y }
           }));
         });
+
+        // 커서 제거 메시지 구독 추가
+        client.subscribe('/topic/cursors/remove', (message) => {
+          const removedUsername = JSON.parse(message.body);
+          console.log(removedUsername);
+          setCursors(prev => {
+            const newCursors = { ...prev };
+            delete newCursors[removedUsername.username];
+            console.log(newCursors);
+            
+            return newCursors;
+          });
+        });
       },
     });
 
     clientRef.current = client;
     client.activate();
 
+    // 브라우저 종료시 커서 위치 전송
+    const handleBeforeUnload = () => {
+      if (clientRef.current) {
+        clientRef.current.publish({
+          destination: '/app/cursors/remove',
+          body: JSON.stringify({ username : usernameRef.current }),
+        });
+        console.log(usernameRef.current);
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
     return () => {
       client.deactivate();
       clientRef.current = null;
+      window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, []);
 
@@ -163,18 +185,22 @@ function App() {
   };
 
   const handleMouseMove = (e) => {
-    if (!username || !clientRef.current) return;
+    if (!usernameRef.current || !clientRef.current) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+    
+    // 실제 캔버스 좌표로 변환
+    const canvasX = Math.floor(x / (CELL_SIZE / viewport.zoom) + viewport.x);
+    const canvasY = Math.floor(y / (CELL_SIZE / viewport.zoom) + viewport.y);
 
     clientRef.current.publish({
       destination: '/app/cursors',
       body: JSON.stringify({
-        username: username,
-        x: x,
-        y: y
+        username: usernameRef.current,
+        x: canvasX,
+        y: canvasY
       })
     });
 
@@ -254,9 +280,9 @@ function App() {
 
   const handleSendMessage = (e) => {
     e.preventDefault();
-    if (!inputMessage.trim() || !username.trim()) return;
+    if (!inputMessage.trim() || !usernameRef.current.trim()) return;
 
-    const message = { sender: username, content: inputMessage, timestamp: Date.now() };
+    const message = { sender: usernameRef.current, content: inputMessage, timestamp: Date.now() };
     clientRef.current.publish({
       destination: '/app/chat/send',
       body: JSON.stringify(message),
@@ -264,6 +290,22 @@ function App() {
     setInputMessage('');
   };
 
+  const handleUsernameChange = (e) => {
+    const newUsername = e.target.value;
+    const oldUsername = usernameRef.current;
+    
+    // 기존 커서 데이터를 새 사용자 이름으로 이동
+    setCursors(prev => {
+      const newCursors = { ...prev };
+      if (prev[oldUsername]) {
+        newCursors[newUsername] = prev[oldUsername];
+        delete newCursors[oldUsername];
+      }
+      return newCursors;
+    });
+    
+    usernameRef.current = newUsername;
+  };
 
   return (
     <div
@@ -273,6 +315,23 @@ function App() {
       onMouseUp={handleMouseUp}
       onWheel={handleWheel}
     >
+      {/* 다른 사용자들의 커서 렌더링 */}
+      {Object.entries(cursors).map(([cursorUsername, position]) => (
+        usernameRef.current !== cursorUsername && (
+          <div
+            key={cursorUsername}
+            className="cursor"
+            style={{
+              left: `${(position.x - viewport.x) * (CELL_SIZE / viewport.zoom)}px`,
+              top: `${(position.y - viewport.y) * (CELL_SIZE / viewport.zoom)}px`
+            }}
+          >
+            <div className="cursor-pointer"></div>
+            <div className="cursor-username">{cursorUsername}</div>
+          </div>
+        )
+      ))}
+      
       <canvas
         ref={canvasRef}
         width={window.innerWidth}
@@ -285,12 +344,9 @@ function App() {
       </button>
       {isChatVisible && (
         <div className="chat-section">
-          <input
-            type="text"
-            placeholder="사용자 이름"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-          />
+          <div className="username-display">
+            <strong>사용자 이름:</strong> {usernameRef.current}
+          </div>
           <div className="chat-messages" ref={chatContainerRef}>
             {messages.map((msg, index) => (
               <div key={index} className="message">

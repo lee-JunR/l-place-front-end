@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import SockJS from 'sockjs-client';
 import { Client } from '@stomp/stompjs';
+import { getRandomNickname } from '@woowa-babble/random-nickname';
 import './App.css';
 
 const COLOR_PALETTE = [
@@ -54,6 +55,7 @@ function App() {
     Array.from({ length: CANVAS_SIZE }, () => Array(CANVAS_SIZE).fill(null))
   );
   const [selectedColor, setSelectedColor] = useState('#ff0000');
+
   const [viewport, setViewport] = useState({
     x: CANVAS_SIZE / 2 - CANVAS_SIZE / 4,
     y: CANVAS_SIZE / 2 - CANVAS_SIZE / 4, 
@@ -61,7 +63,7 @@ function App() {
   });
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
-  const [username, setUsername] = useState('');
+  const usernameRef = useRef('');
   const [isChatVisible, setIsChatVisible] = useState(true);
   const [isPaletteVisible, setIsPaletteVisible] = useState(true);
   const [isUsernameModalOpen, setIsUsernameModalOpen] = useState(false);
@@ -69,8 +71,14 @@ function App() {
   const canvasRef = useRef(null);
   const chatContainerRef = useRef(null);
   const clientRef = useRef(null);
+
+  // 커서 관련
+  const [cursors, setCursors] = useState({});
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
+
+  const type = 'animals'; // animals, heroes, characters, monsters
+
 
   // 초기 데이터 가져오기
   const fetchCanvasData = async () => {
@@ -96,6 +104,8 @@ function App() {
   useEffect(() => {
     fetchCanvasData();
 
+    usernameRef.current = getRandomNickname(type);
+    // 캔버스 정 중앙에서 시작
     const initialZoom = 2;
     const visibleCells = CANVAS_SIZE / initialZoom;
     setViewport({
@@ -148,41 +158,76 @@ function App() {
           });
           subscriptions.add(canvasSub);
 
-          // 채팅 구독
-          const chatSub = stompClient.subscribe('/topic/chat', (message) => {
-            const chatMessage = JSON.parse(message.body);
+        const chatSub = stompClient.subscribe('/topic/chat', (message) => {
+          const chatMessage = JSON.parse(message.body);
+          setMessages(prev => {
+            const isDuplicate = prev.some(msg => 
+              msg.sender === chatMessage.sender && 
+              msg.content === chatMessage.content &&
+              Math.abs(new Date(msg.timestamp) - new Date(chatMessage.timestamp)) < 1000
+            );
+
+            if (isDuplicate) return prev;
+            return [...prev, chatMessage];
+          });          
+          
+          // 새 메시지가 오면 자동 스크롤
+          if (chatContainerRef.current) {
+            chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+          }
+        });
+        subscriptions.add(chatSub);
+
+        // 커서 위치 구독 추가
+        const cursorSub = stompClient.subscribe('/topic/cursors', (message) => {
+          const cursorData = JSON.parse(message.body);
+          setCursors(prev => ({
+            ...prev,
+            [cursorData.username]: { x: cursorData.x, y: cursorData.y }
+          }));
+        });
+        subscriptions.add(cursorSub);
+
+        // 커서 제거 메시지 구독 추가
+        const cursorRemoveSub = stompClient.subscribe('/topic/cursors/remove', (message) => {
+          const removedUsername = JSON.parse(message.body);
+          console.log(removedUsername);
+          setCursors(prev => {
+            const newCursors = { ...prev };
+            delete newCursors[removedUsername.username];
+            console.log(newCursors);
             
-            setMessages(prev => {
-              const isDuplicate = prev.some(msg => 
-                msg.sender === chatMessage.sender && 
-                msg.content === chatMessage.content &&
-                Math.abs(new Date(msg.timestamp) - new Date(chatMessage.timestamp)) < 1000
-              );
-
-              if (isDuplicate) return prev;
-              return [...prev, chatMessage];
-            });
-
-            // 새 메시지가 오면 자동 스크롤
-            if (chatContainerRef.current) {
-              chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-            }
+            return newCursors;
           });
-          subscriptions.add(chatSub);
-        },
-        onDisconnect: () => {
-          console.log('WebSocket 연결 해제됨');
-        },
-        onStompError: (frame) => {
-          console.error('STOMP 에러:', frame);
-        }
-      });
+        });
+        subscriptions.add(cursorRemoveSub);
+      },
+      onDisconnect: () => {
+        console.log('WebSocket 연결 해제됨');
+      },
+      onStompError: (frame) => {
+        console.error('STOMP 에러:', frame);
+      }
+    });
 
-      clientRef.current = stompClient;
-      stompClient.activate();
+    clientRef.current = stompClient;
+    stompClient.activate();
+  };
+
+  connect();
+
+    // 브라우저 종료시 커서 위치 전송
+    const handleBeforeUnload = () => {
+      if (clientRef.current) {
+        clientRef.current.publish({
+          destination: '/app/cursors/remove',
+          body: JSON.stringify({ username : usernameRef.current }),
+        });
+        console.log(usernameRef.current);
+      }
     };
 
-    connect();
+    window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
       subscriptions.forEach(sub => sub.unsubscribe());
@@ -191,6 +236,7 @@ function App() {
         clientRef.current.deactivate();
       }
       clientRef.current = null;
+      window.removeEventListener('beforeunload', handleBeforeUnload);
       stompClient = null;
     };
   }, []);
@@ -251,6 +297,25 @@ function App() {
   };
 
   const handleMouseMove = (e) => {
+    if (!usernameRef.current || !clientRef.current) return;
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    // 실제 캔버스 좌표로 변환
+    const canvasX = Math.floor(x / (CELL_SIZE / viewport.zoom) + viewport.x);
+    const canvasY = Math.floor(y / (CELL_SIZE / viewport.zoom) + viewport.y);
+
+    clientRef.current.publish({
+      destination: '/app/cursors',
+      body: JSON.stringify({
+        username: usernameRef.current,
+        x: canvasX,
+        y: canvasY
+      })
+    });
+
     if (!isDragging.current) return;
 
     const dx = (e.clientX - dragStart.current.x);
@@ -357,10 +422,10 @@ function App() {
 
   const handleSendMessage = (e) => {
     e.preventDefault();
-    if (!inputMessage.trim() || !username.trim()) return;
+    if (!inputMessage.trim() || !usernameRef.current.trim()) return;
 
     const message = { 
-      sender: username.trim(), 
+      sender: usernameRef.current.trim(), 
       content: inputMessage.trim(), 
       timestamp: Date.now() 
     };
@@ -442,11 +507,11 @@ function App() {
 
   // 사용자 이름 모달 컴포넌트 수정
   const UsernameModal = () => {
-    const [tempUsername, setTempUsername] = useState(username);
+    const [tempUsername, setTempUsername] = useState(usernameRef.current);
 
     const handleSubmit = () => {
       if (tempUsername.trim()) {
-        setUsername(tempUsername.trim());
+        usernameRef.current = tempUsername.trim();
         setIsUsernameModalOpen(false);
       }
     };
@@ -499,6 +564,23 @@ function App() {
     );
   };
 
+  const handleUsernameChange = (e) => {
+    const newUsername = e.target.value;
+    const oldUsername = usernameRef.current;
+    
+    // 기존 커서 데이터를 새 사용자 이름으로 이동
+    setCursors(prev => {
+      const newCursors = { ...prev };
+      if (prev[oldUsername]) {
+        newCursors[newUsername] = prev[oldUsername];
+        delete newCursors[oldUsername];
+      }
+      return newCursors;
+    });
+    
+    usernameRef.current = newUsername;
+  };
+
   return (
     <div
       className="app-container"
@@ -508,6 +590,23 @@ function App() {
       onMouseLeave={handleMouseUp}
       onWheel={handleWheel}
     >
+      {/* 다른 사용자들의 커서 렌더링 */}
+      {Object.entries(cursors).map(([cursorUsername, position]) => (
+        usernameRef.current !== cursorUsername && (
+          <div
+            key={cursorUsername}
+            className="cursor"
+            style={{
+              left: `${(position.x - viewport.x) * (CELL_SIZE / viewport.zoom)}px`,
+              top: `${(position.y - viewport.y) * (CELL_SIZE / viewport.zoom)}px`
+            }}
+          >
+            <div className="cursor-pointer"></div>
+            <div className="cursor-username">{cursorUsername}</div>
+          </div>
+        )
+      ))}
+      
       <div className="toolbar">
         <div className="logo">
           <span className="l">l</span>
@@ -579,14 +678,14 @@ function App() {
             onClick={() => setIsUsernameModalOpen(true)}
           >
             <UserIcon />
-            <span>{username || '사용자 이름 설정'}</span>
+            <span>{usernameRef.current || '사용자 이름 설정'}</span>
           </div>
         </div>
         <div className="chat-messages" ref={chatContainerRef}>
           {messages.map((msg, index) => (
             <div 
               key={index} 
-              className={`message ${msg.sender === username ? 'own-message' : ''}`}
+              className={`message ${msg.sender === usernameRef.current ? 'own-message' : ''}`}
             >
               <span className="sender">{msg.sender}</span>
               <span className="content">{msg.content}</span>

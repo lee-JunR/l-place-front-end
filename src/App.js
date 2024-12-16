@@ -24,12 +24,6 @@ const ChatCloseIcon = () => (
   </svg>
 );
 
-const PaletteIcon = () => (
-  <svg viewBox="0 0 24 24" fill="currentColor">
-    <path d="M12 2C6.49 2 2 6.49 2 12s4.49 10 10 10c1.38 0 2.5-1.12 2.5-2.5 0-.61-.23-1.2-.64-1.67-.08-.1-.13-.21-.13-.33 0-.28.22-.5.5-.5H16c3.31 0 6-2.69 6-6 0-4.96-4.49-9-10-9zm5.5 11c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm-3-4c-.83 0-1.5-.67-1.5-1.5S13.67 6 14.5 6s1.5.67 1.5 1.5S15.33 9 14.5 9zM5 11.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5S7.33 13 6.5 13 5 12.33 5 11.5zm6-4c0 .83-.67 1.5-1.5 1.5S8 8.33 8 7.5 8.67 6 9.5 6s1.5.67 1.5 1.5z"/>
-  </svg>
-);
-
 // 사용자 아이콘 컴포넌트 추가
 const UserIcon = () => (
   <svg viewBox="0 0 24 24" fill="currentColor">
@@ -47,7 +41,6 @@ const PaletteToggleIcon = () => (
 function App() {
   const CANVAS_SIZE = 256; // 캔버스 크기
   const CELL_SIZE = 16; // 셀 크기 
-  const PADDING = 20; // 패딩 영역 추가
   const MIN_ZOOM = 1; // 최소 줌 레벨
   const MAX_ZOOM = 4; // 최대 줌 레벨
 
@@ -68,7 +61,6 @@ function App() {
   const [isPaletteVisible, setIsPaletteVisible] = useState(true);
   const [isUsernameModalOpen, setIsUsernameModalOpen] = useState(false);
 
-  const backgroundCanvasRef = useRef(null);
   const mainCanvasRef = useRef(null);
   const chatContainerRef = useRef(null);
   const clientRef = useRef(null);
@@ -80,9 +72,6 @@ function App() {
 
   const type = 'animals'; // animals, heroes, characters, monsters
 
-  // 드래그 관련 상수 수정
-  const DRAG_THRESHOLD = 3;
-  const EDGE_PADDING = 20;
 
   // WebSocket 관련 상수 추가
   const RECONNECT_DELAY = 5000;
@@ -95,45 +84,48 @@ function App() {
   const fetchCanvasData = async () => {
     try {
       const response = await fetch('http://localhost:8080/api/canvas', {
-        headers: {
-          'Cache-Control': 'no-cache'
-        }
+        headers: { 'Cache-Control': 'no-cache' },
       });
-      
+  
       if (!response.ok) {
         throw new Error('캔버스 데이터 가져오기 실패');
       }
-
+  
       const pixels = await response.json();
-      console.log('서버에서 받은 픽셀 데이터:', pixels);
-
-      // 2차원 배열 초기화 (기본 흰색)
-      const initialCanvas = Array.from({ length: CANVAS_SIZE }, () =>
-        Array(CANVAS_SIZE).fill(null).map((_, x, arr) => ({
+  
+      // 초기 2차원 배열 생성
+      const initialCanvas = Array.from({ length: CANVAS_SIZE }, (_, y) =>
+        Array.from({ length: CANVAS_SIZE }, (_, x) => ({
           x,
-          y: arr.length,
-          color: '#FFFFFF'
+          y,
+          color: '#FFFFFF', // 기본 색상은 흰색
         }))
       );
-
+  
       // 서버에서 받은 픽셀 데이터 적용
       pixels.forEach(pixel => {
-        if (pixel && pixel.x >= 0 && pixel.x < CANVAS_SIZE && 
-            pixel.y >= 0 && pixel.y < CANVAS_SIZE) {
+        if (
+          pixel &&
+          pixel.x >= 0 &&
+          pixel.x < CANVAS_SIZE &&
+          pixel.y >= 0 &&
+          pixel.y < CANVAS_SIZE
+        ) {
           initialCanvas[pixel.y][pixel.x] = {
             x: pixel.x,
             y: pixel.y,
-            color: pixel.color
+            color: pixel.color,
           };
         }
       });
-
+  
+      // 상태 업데이트
       setCanvasData(initialCanvas);
     } catch (error) {
       console.error('캔버스 데이터 가져오기 오류:', error);
     }
   };
-
+  
   useEffect(() => {
     fetchCanvasData();
     usernameRef.current = getRandomNickname(type);
@@ -328,10 +320,7 @@ function App() {
     };
   }, []);
 
-  // 격자 크기 계산 함수 추가
-  const calculateGridSize = () => {
-    return CELL_SIZE / viewport.zoom;
-  };
+
 
   // renderCanvas 함수 수정
   const renderCanvas = () => {
@@ -375,7 +364,7 @@ function App() {
 
   useEffect(() => {
     renderCanvas();
-  }, [canvasData, viewport]);
+  });
 
   // handleMouseMove 함수 수정
   const handleMouseMove = (e) => {
@@ -616,7 +605,7 @@ function App() {
   // viewport나 canvasData가 변경될 때마다 캔버스 업데이트
   useEffect(() => {
     requestAnimationFrame(renderCanvas);
-  }, [viewport, canvasData]);
+  });
 
   // 채팅창 스크롤 이벤트 처리
   const handleChatScroll = (e) => {
@@ -696,22 +685,6 @@ function App() {
     );
   };
 
-  const handleUsernameChange = (e) => {
-    const newUsername = e.target.value;
-    const oldUsername = usernameRef.current;
-    
-    // 기존 커서 데이터를 새 사용자 이름으로 이동
-    setCursors(prev => {
-      const newCursors = { ...prev };
-      if (prev[oldUsername]) {
-        newCursors[newUsername] = prev[oldUsername];
-        delete newCursors[oldUsername];
-      }
-      return newCursors;
-    });
-    
-    usernameRef.current = newUsername;
-  };
 
   // 창 기본 변경 시 캔스 중앙 정렬
   useEffect(() => {
@@ -912,4 +885,3 @@ function App() {
 }
 
 export default App;
-

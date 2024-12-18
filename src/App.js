@@ -44,6 +44,12 @@ const PaletteToggleIcon = () => (
   </svg>
 );
 
+// 상단에 랜덤 색상 생성 함수 추가
+const generateRandomColor = () => {
+  const hue = Math.floor(Math.random() * 360);
+  return `hsl(${hue}, 70%, 50%)`;
+};
+
 function App() {
   const CANVAS_SIZE = 256; // 캔버스 크기
   const CELL_SIZE = 16; // 셀 크기 
@@ -183,7 +189,11 @@ function App() {
           const cursorData = JSON.parse(message.body);
           setCursors(prev => ({
             ...prev,
-            [cursorData.username]: { x: cursorData.x, y: cursorData.y }
+            [cursorData.username]: {
+              x: cursorData.x,
+              y: cursorData.y,
+              color: prev[cursorData.username]?.color || generateRandomColor()
+            }
           }));
         });
         subscriptions.add(cursorSub);
@@ -358,7 +368,7 @@ function App() {
     setViewport((prev) => {
       const rect = canvasRef.current.getBoundingClientRect();
       
-      // 현재 마우스 위치의 캔버스상 좌표 계산
+      // 현재 마우스 위치의 캔버스 좌표 계산
       const mouseCanvasX = (e.clientX - rect.left);
       const mouseCanvasY = (e.clientY - rect.top);
       
@@ -430,7 +440,7 @@ function App() {
       timestamp: Date.now() 
     };
     
-    console.log('메시지 전송 시도:', message);
+    console.log('메시지 전송 도:', message);
     
     if (clientRef.current?.connected) {
       clientRef.current.publish({
@@ -601,8 +611,19 @@ function App() {
               top: `${(position.y - viewport.y) * (CELL_SIZE / viewport.zoom)}px`
             }}
           >
-            <div className="cursor-pointer"></div>
-            <div className="cursor-username">{cursorUsername}</div>
+            <div 
+              className="cursor-pointer"
+              style={{ backgroundColor: position.color }}
+            ></div>
+            <div 
+              className="cursor-username"
+              style={{ 
+                border: `2px solid ${position.color}`,
+                backgroundColor: 'rgba(0, 0, 0, 0.5)'
+              }}
+            >
+              {cursorUsername}
+            </div>
           </div>
         )
       ))}

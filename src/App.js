@@ -226,27 +226,37 @@ function App() {
 
   connect();
 
-    // 브라우저 종료시 커서 위치 전송
-    const handleBeforeUnload = () => {
-      if (clientRef.current) {
+    // 페이지 가시성 변경 이벤트 핸들러
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && clientRef.current) {
         clientRef.current.publish({
           destination: '/app/cursors/remove',
-          body: JSON.stringify({ username : usernameRef.current }),
+          body: JSON.stringify({ username: usernameRef.current }),
         });
-        console.log(usernameRef.current);
       }
     };
 
-    window.addEventListener('beforeunload', handleBeforeUnload);
+    // 이벤트 리스너 등록
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
+      // 정리 함수
+      if (document.visibilityState === 'hidden' && clientRef.current) {
+        clientRef.current.publish({
+          destination: '/app/cursors/remove',
+          body: JSON.stringify({ username: usernameRef.current }),
+        });
+      }
+
       subscriptions.forEach(sub => sub.unsubscribe());
       subscriptions.clear();
+      
       if (clientRef.current?.connected) {
         clientRef.current.deactivate();
       }
+      
       clientRef.current = null;
-      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       stompClient = null;
     };
   }, []);

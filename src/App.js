@@ -83,7 +83,7 @@ function App() {
   // 초기 데이터 가져오기
   const fetchCanvasData = async () => {
     try {
-      const response = await fetch('http://localhost:8080/api/canvas');
+      const response = await fetch(`${process.env.REACT_APP_BACKEND_API_URL}/api/canvas`);
       const data = await response.json();
 
       const initialCanvas = Array.from({ length: CANVAS_SIZE }, () =>
@@ -127,7 +127,7 @@ function App() {
       }
 
       stompClient = new Client({
-        webSocketFactory: () => new SockJS('http://localhost:8080/ws'),
+        webSocketFactory: () => new SockJS(`${process.env.REACT_APP_BACKEND_API_URL}/ws`),
         reconnectDelay: 5000,
         onConnect: () => {
           console.log('WebSocket 연결됨');
@@ -401,7 +401,8 @@ function App() {
     if (clickedX >= 0 && clickedX < CANVAS_SIZE && clickedY >= 0 && clickedY < CANVAS_SIZE) {
       const pixelDTO = { x: clickedX, y: clickedY, color: selectedColor };
       try {
-        const response = await fetch('http://localhost:8080/api/pixel', {
+        // const response = await fetch('http://localhost:8080/api/pixel', {
+        const response = await fetch(`${process.env.REACT_APP_BACKEND_API_URL}/api/pixel`, { // 변경된 부분
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(pixelDTO),

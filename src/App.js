@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import SockJS from 'sockjs-client';
 import { Client } from '@stomp/stompjs';
 import { getRandomNickname } from '@woowa-babble/random-nickname';
@@ -11,7 +11,7 @@ const COLOR_PALETTE = [
   '#ff69b4', '#ffd700', '#ff4500', 'custom'
 ];
 
-// App.js 상단에 SVG 아이콘 컴포넌트 추가
+// SVG 아이콘 컴포넌트
 const ChatIcon = () => (
   <svg viewBox="0 0 24 24" fill="currentColor">
     <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
@@ -24,7 +24,7 @@ const ChatCloseIcon = () => (
   </svg>
 );
 
-// 사용자 아이콘 컴포넌트 추가
+// 사용자 아이콘 컴포넌트
 const UserIcon = () => (
   <svg viewBox="0 0 24 24" fill="currentColor">
     <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/>
@@ -38,7 +38,7 @@ const PaletteToggleIcon = () => (
   </svg>
 );
 
-// 상단에 랜덤 색상 생성 함수 추가
+// 랜덤 색상 생성 함수
 const generateRandomColor = () => {
   const hue = Math.floor(Math.random() * 360);
   return `hsl(${hue}, 70%, 50%)`;
@@ -65,7 +65,6 @@ function App() {
   const usernameRef = useRef('');
   const [isChatVisible, setIsChatVisible] = useState(true);
   const [isPaletteVisible, setIsPaletteVisible] = useState(true);
-  const [isUsernameModalOpen, setIsUsernameModalOpen] = useState(false);
 
   const mainCanvasRef = useRef(null);
   const chatContainerRef = useRef(null);
@@ -84,6 +83,9 @@ function App() {
 
   // 스페이스바 상태 추가
   const [isSpacePressed, setIsSpacePressed] = useState(false);
+
+  // Pixel Placement Indicator State
+  const [placedPixels, setPlacedPixels] = useState([]);
 
   // 초기 데이터 가져오기
   const fetchCanvasData = async () => {
@@ -255,7 +257,7 @@ function App() {
         if (pixelData && typeof pixelData.x === 'number' && 
             typeof pixelData.y === 'number' && pixelData.color) {
           setCanvasData(prevCanvas => {
-            const newCanvas = [...prevCanvas];
+            const newCanvas = prevCanvas.map(row => row.slice());
             newCanvas[pixelData.y][pixelData.x] = {
               x: pixelData.x,
               y: pixelData.y,
@@ -358,20 +360,34 @@ function App() {
     };
   }, []);
 
-  // renderCanvas 함수 수정
-  const renderCanvas = () => {
-    const canvas = mainCanvasRef.current;
-    if (!canvas) return;
+  // 화면 크기에 맞춰 화면 좌표를 캔버스 좌표로 변환하는 함수
+  const getScreenCoords = useCallback((x, y) => {
+    const scaledCellSize = CELL_SIZE / viewport.zoom;
+    const totalCanvasWidth = CANVAS_SIZE * scaledCellSize;
+    const totalCanvasHeight = CANVAS_SIZE * scaledCellSize;
+    const offsetX = (window.innerWidth - totalCanvasWidth) / 2;
+    const offsetY = (window.innerHeight - totalCanvasHeight) / 2;
     
-    const context = canvas.getContext('2d');
+    return {
+      left: `${(x - viewport.x) * scaledCellSize + offsetX}px`,
+      top: `${(y - viewport.y) * scaledCellSize + offsetY}px`
+    };
+  }, [viewport.zoom, viewport.x, viewport.y]);
+
+  // renderCanvas 함수를 useCallback으로 메모이제이션
+  const renderCanvas = useCallback(() => {
+    const mainCanvas = mainCanvasRef.current;
+    if (!mainCanvas) return;
+
+    const context = mainCanvas.getContext('2d');
     if (!context) return;
 
     const width = window.innerWidth;
     const height = window.innerHeight;
     
-    if (canvas.width !== width || canvas.height !== height) {
-      canvas.width = width;
-      canvas.height = height;
+    if (mainCanvas.width !== width || mainCanvas.height !== height) {
+      mainCanvas.width = width;
+      mainCanvas.height = height;
     }
 
     // 전체 화면을 검은색으로 채우기
@@ -396,11 +412,23 @@ function App() {
         context.fillRect(renderX, renderY, renderSize, renderSize);
       }
     }
-  };
 
+    // Draw pixel placement indicators
+    context.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+    context.lineWidth = 2;
+    placedPixels.forEach(pixel => {
+      const renderX = Math.floor(offsetX + (pixel.x - viewport.x) * scaledCellSize);
+      const renderY = Math.floor(offsetY + (pixel.y - viewport.y) * scaledCellSize);
+      const renderSize = Math.max(1, Math.ceil(scaledCellSize));
+
+      context.strokeRect(renderX, renderY, renderSize, renderSize);
+    });
+  }, [canvasData, viewport, placedPixels]);
+
+  // viewport나 canvasData, placedPixels가 변경될 때마다 캔버스 업데이트
   useEffect(() => {
-    renderCanvas();
-  }, [canvasData, viewport]);
+    requestAnimationFrame(renderCanvas);
+  }, [viewport, canvasData, placedPixels, renderCanvas]);
 
   // handleMouseMove 함수 수정
   const handleMouseMove = (e) => {
@@ -456,7 +484,8 @@ function App() {
     
     if (e.button === 0 && isSpacePressed) { // 스페이스바가 눌린 상태에서만 드래그
       isDragging.current = true;
-      e.currentTarget.classList.add('dragging');
+      // 'dragging' 클래스를 main-canvas에 적용
+      mainCanvasRef.current.classList.add('dragging');
     }
   };
 
@@ -464,7 +493,8 @@ function App() {
   const handleMouseUp = (e) => {
     if (isDragging.current) {
       isDragging.current = false;
-      e.currentTarget.classList.remove('dragging');
+      // 'dragging' 클래스를 main-canvas에서 제거
+      mainCanvasRef.current.classList.remove('dragging');
     }
   };
 
@@ -472,7 +502,8 @@ function App() {
   const handleMouseLeave = (e) => {
     if (isDragging.current) {
       isDragging.current = false;
-      e.currentTarget.classList.remove('dragging');
+      // 'dragging' 클래스를 main-canvas에서 제거
+      mainCanvasRef.current.classList.remove('dragging');
     }
   };
 
@@ -561,10 +592,18 @@ function App() {
         const updatedPixel = JSON.parse(text);
         if (updatedPixel) {
           setCanvasData(prevCanvas => {
-            const newCanvas = [...prevCanvas];
+            const newCanvas = prevCanvas.map(row => row.slice());
             newCanvas[updatedPixel.y][updatedPixel.x] = updatedPixel;
             return newCanvas;
           });
+
+          // Add to placedPixels for indicator
+          setPlacedPixels(prev => [...prev, { x: updatedPixel.x, y: updatedPixel.y }]);
+
+          // Remove the indicator after 1 second
+          setTimeout(() => {
+            setPlacedPixels(prev => prev.filter(p => !(p.x === updatedPixel.x && p.y === updatedPixel.y)));
+          }, 1000);
         }
       } catch (error) {
         console.error('픽셀 업데이트 오류:', error);
@@ -633,11 +672,6 @@ function App() {
     };
   }, []);
 
-  // viewport나 canvasData가 변경될 때마다 캔버스 업데이트
-  useEffect(() => {
-    requestAnimationFrame(renderCanvas);
-  }, [viewport, canvasData]);
-
   // 채팅창 스크롤 이벤트 처리
   const handleChatScroll = (e) => {
     e.stopPropagation(); // 이벤트 전파 중단
@@ -656,66 +690,6 @@ function App() {
   const togglePalette = () => {
     setIsPaletteVisible(!isPaletteVisible);
   };
-
-  // 사용자 이름 모달 컴포넌트 수정
-  const UsernameModal = () => {
-    const [tempUsername, setTempUsername] = useState(usernameRef.current);
-
-    const handleSubmit = () => {
-      if (tempUsername.trim()) {
-        usernameRef.current = tempUsername.trim();
-        setIsUsernameModalOpen(false);
-      }
-    };
-
-    const handleKeyPress = (e) => {
-      if (e.key === 'Enter') {
-        handleSubmit();
-      }
-    };
-
-    return (
-      <>
-        <div className="modal-overlay" onClick={() => setIsUsernameModalOpen(false)} />
-        <div className="username-modal">
-          <div className="username-modal-header">
-            <UserIcon />
-            <h2>사용자 이름 설정</h2>
-          </div>
-          <div className="username-modal-content">
-            <p>
-              채팅서 사용할 이름을 입력해주세요.<br />
-              다른 사용자들에게 보여 이름입니다.
-            </p>
-            <input
-              type="text"
-              value={tempUsername}
-              onChange={(e) => setTempUsername(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder="사용자 이름 입력 (2-20자)"
-              maxLength={20}
-              autoFocus
-            />
-          </div>
-          <div className="modal-buttons">
-            <button 
-              className="modal-button cancel"
-              onClick={() => setIsUsernameModalOpen(false)}
-            >
-              취소
-            </button>
-            <button 
-              className="modal-button confirm"
-              onClick={handleSubmit}
-            >
-              확인
-            </button>
-          </div>
-        </div>
-      </>
-    );
-  };
-
 
   // 창 기본 변경 시 캔버스 중앙 정렬
   useEffect(() => {
@@ -802,10 +776,7 @@ function App() {
           <div
             key={cursorUsername}
             className="cursor"
-            style={{
-              left: `${(position.x - viewport.x) * (CELL_SIZE / viewport.zoom) + window.innerWidth / 2}px`,
-              top: `${(position.y - viewport.y) * (CELL_SIZE / viewport.zoom) + window.innerHeight / 2}px`
-            }}
+            style={getScreenCoords(position.x, position.y)}
           >
             <div 
               className="cursor-pointer"
@@ -882,12 +853,9 @@ function App() {
         onWheel={handleChatScroll} // 채팅 스크롤 이벤트 처리 추가
       >
         <div className="chat-header">
-          <div 
-            className="username-display"
-            onClick={() => setIsUsernameModalOpen(true)}
-          >
+          <div className="username-display">
             <UserIcon />
-            <span>{usernameRef.current || '사용자 이름 설정'}</span>
+            <span>{usernameRef.current}</span>
           </div>
         </div>
         <div className="chat-messages" ref={chatContainerRef}>
@@ -920,8 +888,6 @@ function App() {
           </form>
         </div>
       </div>
-
-      {isUsernameModalOpen && <UsernameModal />}
     </div>
   );
 }

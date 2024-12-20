@@ -38,6 +38,12 @@ const PaletteToggleIcon = () => (
   </svg>
 );
 
+// 상단에 랜덤 색상 생성 함수 추가
+const generateRandomColor = () => {
+  const hue = Math.floor(Math.random() * 360);
+  return `hsl(${hue}, 70%, 50%)`;
+};
+
 function App() {
   const CANVAS_SIZE = 256; // 캔버스 크기
   const CELL_SIZE = 16; // 셀 크기 
@@ -71,7 +77,6 @@ function App() {
   const dragStart = useRef({ x: 0, y: 0 });
 
   const type = 'animals'; // animals, heroes, characters, monsters
-
 
   // WebSocket 관련 상수 추가
   const RECONNECT_DELAY = 5000;
@@ -190,10 +195,12 @@ function App() {
               const canvasSub = stompClient.subscribe('/topic/canvas', handleCanvasMessage);
               const chatSub = stompClient.subscribe('/topic/chat', handleChatMessage);
               const cursorSub = stompClient.subscribe('/topic/cursors', handleCursorMessage);
+              const cursorRemoveSub = stompClient.subscribe('/topic/cursors/remove', handleCursorRemoveMessage);
               
               subscriptions.add(canvasSub);
               subscriptions.add(chatSub);
               subscriptions.add(cursorSub);
+              subscriptions.add(cursorRemoveSub);
 
               clientRef.current = stompClient;
             } catch (error) {
@@ -298,6 +305,7 @@ function App() {
           [cursorData.username]: { 
             x: cursorData.x, 
             y: cursorData.y,
+            color: prev[cursorData.username]?.color || generateRandomColor(),
             timestamp: Date.now() // 타임스탬프 추가
           }
         }));
@@ -306,21 +314,49 @@ function App() {
       }
     };
 
+    const handleCursorRemoveMessage = (message) => {
+      try {
+        const removedUsername = JSON.parse(message.body);
+        console.log(`사용자 커서 제거: ${removedUsername.username}`);
+        setCursors(prev => {
+          const newCursors = { ...prev };
+          delete newCursors[removedUsername.username];
+          return newCursors;
+        });
+      } catch (error) {
+        console.error('커서 제거 메시지 처리 중 오류:', error);
+      }
+    };
+
     // 초기 연결 시작
     connect();
+
+    // 페이지 가시성 변경 이벤트 핸들러
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && clientRef.current) {
+        clientRef.current.publish({
+          destination: '/app/cursors/remove',
+          body: JSON.stringify({ username: usernameRef.current }),
+        });
+      }
+    };
+
+    // 이벤트 리스너 등록
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     // 정리 함수
     return () => {
       clearTimeout(reconnectTimeout);
-      subscriptions.forEach(sub => sub?.unsubscribe());
+      subscriptions.forEach(sub => sub.unsubscribe());
       subscriptions.clear();
       if (stompClient?.connected) {
         stompClient.deactivate();
       }
+
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      stompClient = null;
     };
   }, []);
-
-
 
   // renderCanvas 함수 수정
   const renderCanvas = () => {
@@ -364,7 +400,7 @@ function App() {
 
   useEffect(() => {
     renderCanvas();
-  });
+  }, [canvasData, viewport]);
 
   // handleMouseMove 함수 수정
   const handleMouseMove = (e) => {
@@ -398,11 +434,11 @@ function App() {
     const scaledCellSize = CELL_SIZE / viewport.zoom;
     const totalCanvasWidth = CANVAS_SIZE * scaledCellSize;
     const totalCanvasHeight = CANVAS_SIZE * scaledCellSize;
-    const offsetX = (window.innerWidth - totalCanvasWidth) / 2;
-    const offsetY = (window.innerHeight - totalCanvasHeight) / 2;
+    const offsetXCanvas = (window.innerWidth - totalCanvasWidth) / 2;
+    const offsetYCanvas = (window.innerHeight - totalCanvasHeight) / 2;
 
-    const canvasX = Math.floor((x - offsetX) / scaledCellSize + viewport.x);
-    const canvasY = Math.floor((y - offsetY) / scaledCellSize + viewport.y);
+    const canvasX = Math.floor((x - offsetXCanvas) / scaledCellSize + viewport.x);
+    const canvasY = Math.floor((y - offsetYCanvas) / scaledCellSize + viewport.y);
 
     clientRef.current.publish({
       destination: '/app/cursors',
@@ -452,13 +488,8 @@ function App() {
       const scaledCellSize = CELL_SIZE / prev.zoom;
       
       // 마우스 위치를 캔버스 상의 좌표로 변환
-      const totalCanvasWidth = CANVAS_SIZE * scaledCellSize;
-      const totalCanvasHeight = CANVAS_SIZE * scaledCellSize;
-      const offsetX = (rect.width - totalCanvasWidth) / 2;
-      const offsetY = (rect.height - totalCanvasHeight) / 2;
-      
-      const mouseX = e.clientX - rect.left - offsetX;
-      const mouseY = e.clientY - rect.top - offsetY;
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
       
       // 마우스 위치의 캔버스 좌표 계산
       const pointX = mouseX / scaledCellSize + prev.x;
@@ -551,7 +582,7 @@ function App() {
       timestamp: Date.now() 
     };
     
-    console.log('메시지 전송 시도:', message);
+    console.log('메시지 전송 도:', message);
     
     if (clientRef.current?.connected) {
       clientRef.current.publish({
@@ -563,7 +594,7 @@ function App() {
     }
   };
 
-  // 캔버스 크기 설정을 위한 운 함수 추가
+  // 캔버스 크기 설정을 위한 함수 추가
   const updateCanvasSize = () => {
     if (mainCanvasRef.current) {
       const canvas = mainCanvasRef.current;
@@ -581,14 +612,14 @@ function App() {
     }
   };
 
-  // useEffect에서 초기 설정과 resize ���벤트 처리
+  // useEffect에서 초기 설정과 resize 이벤트 처리
   useEffect(() => {
     // 초기 캔버스 크기 설정
     updateCanvasSize();
     
     let resizeTimeout;
     const handleResize = () => {
-      // 디운스 처리
+      // 디바운스 처리
       clearTimeout(resizeTimeout);
       resizeTimeout = setTimeout(() => {
         updateCanvasSize();
@@ -605,17 +636,17 @@ function App() {
   // viewport나 canvasData가 변경될 때마다 캔버스 업데이트
   useEffect(() => {
     requestAnimationFrame(renderCanvas);
-  });
+  }, [viewport, canvasData]);
 
   // 채팅창 스크롤 이벤트 처리
   const handleChatScroll = (e) => {
-    e.stopPropagation(); // 이트 전파 중단
+    e.stopPropagation(); // 이벤트 전파 중단
   };
 
   // 색상 선택 처리 함수 추가
   const handleColorSelect = (color) => {
     if (color === 'custom') {
-      // 커스텀 상은 input의 onChange서 처리
+      // 커스텀 색상은 input의 onChange에서 처리
       return;
     }
     setSelectedColor(color);
@@ -686,7 +717,7 @@ function App() {
   };
 
 
-  // 창 기본 변경 시 캔스 중앙 정렬
+  // 창 기본 변경 시 캔버스 중앙 정렬
   useEffect(() => {
     const handleResize = () => {
       setViewport(prev => {
@@ -772,12 +803,23 @@ function App() {
             key={cursorUsername}
             className="cursor"
             style={{
-              left: `${(position.x - viewport.x) * (CELL_SIZE / viewport.zoom)}px`,
-              top: `${(position.y - viewport.y) * (CELL_SIZE / viewport.zoom)}px`
+              left: `${(position.x - viewport.x) * (CELL_SIZE / viewport.zoom) + window.innerWidth / 2}px`,
+              top: `${(position.y - viewport.y) * (CELL_SIZE / viewport.zoom) + window.innerHeight / 2}px`
             }}
           >
-            <div className="cursor-pointer"></div>
-            <div className="cursor-username">{cursorUsername}</div>
+            <div 
+              className="cursor-pointer"
+              style={{ backgroundColor: position.color }}
+            ></div>
+            <div 
+              className="cursor-username"
+              style={{ 
+                border: `2px solid ${position.color}`,
+                backgroundColor: 'rgba(0, 0, 0, 0.5)'
+              }}
+            >
+              {cursorUsername}
+            </div>
           </div>
         )
       ))}

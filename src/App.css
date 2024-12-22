@@ -166,15 +166,15 @@
   background-color: rgba(255, 255, 255, 0.07);
   border-radius: 8px;
   font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s ease;
+  /* cursor: pointer;
+  transition: all 0.2s ease; */
   color: rgba(255, 255, 255, 0.9);
 }
 
-.username-display:hover {
+/* .username-display:hover {
   background-color: rgba(255, 255, 255, 0.12);
   transform: translateY(-1px);
-}
+} */
 
 .username-display svg {
   width: 16px;
@@ -643,7 +643,7 @@
 
 .cursor {
   position: absolute;
-  z-index: 1000;
+  z-index: 50;
   display: flex;
   align-items: center;
   flex-direction: row;

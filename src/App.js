@@ -135,7 +135,16 @@ function App() {
   
   useEffect(() => {
     fetchCanvasData();
-    usernameRef.current = getRandomNickname(type);
+    
+    // localStorage에서 닉네임 확인 또는 새로 생성
+    const savedUsername = localStorage.getItem('username');
+    if (savedUsername) {
+      usernameRef.current = savedUsername;
+    } else {
+      const newUsername = getRandomNickname(type);
+      usernameRef.current = newUsername;
+      localStorage.setItem('username', newUsername);
+    }
 
     // 화면 크기에 맞춰 초기 줌 레벨 계산
     const windowAspect = window.innerWidth / window.innerHeight;
@@ -430,7 +439,74 @@ function App() {
     requestAnimationFrame(renderCanvas);
   }, [viewport, canvasData, placedPixels, renderCanvas]);
 
-  // handleMouseMove 함수 수정
+  // 커서 위치 계산 함수를 분리
+  const calculateCursorPosition = (clientX, clientY, viewport) => {
+    const scaledCellSize = CELL_SIZE / viewport.zoom;
+    const totalCanvasWidth = CANVAS_SIZE * scaledCellSize;
+    const totalCanvasHeight = CANVAS_SIZE * scaledCellSize;
+    const offsetXCanvas = (window.innerWidth - totalCanvasWidth) / 2;
+    const offsetYCanvas = (window.innerHeight - totalCanvasHeight) / 2;
+
+    const x = clientX - offsetXCanvas;
+    const y = clientY - offsetYCanvas;
+
+    return {
+      x: viewport.x + x / scaledCellSize,
+      y: viewport.y + y / scaledCellSize
+    };
+  };
+
+  // handleWheel 함수 수정
+  const handleWheel = (e) => {
+    if (e.target.closest('.chat-section')) return;
+    
+    e.preventDefault();
+    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+    
+    setViewport((prev) => {
+      const rect = mainCanvasRef.current.getBoundingClientRect();
+      const scaledCellSize = CELL_SIZE / prev.zoom;
+      
+      // 마우스 위치를 캔버스 상의 좌표로 변환
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      
+      // 마우스 위치의 캔버스 좌표 계산
+      const pointX = mouseX / scaledCellSize + prev.x;
+      const pointY = mouseY / scaledCellSize + prev.y;
+      
+      // 새로운 줌 레벨
+      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev.zoom * zoomFactor));
+      const newScaledCellSize = CELL_SIZE / newZoom;
+      
+      // 새로운 뷰포트 위치 계산
+      const newX = pointX - mouseX / newScaledCellSize;
+      const newY = pointY - mouseY / newScaledCellSize;
+
+      const newViewport = {
+        zoom: newZoom,
+        x: Math.max(-CANVAS_SIZE * 0.1, Math.min(CANVAS_SIZE * 1.1, newX)),
+        y: Math.max(-CANVAS_SIZE * 0.1, Math.min(CANVAS_SIZE * 1.1, newY))
+      };
+
+      // 새로운 뷰포트로 커서 위치 업데이트
+      if (clientRef.current?.connected) {
+        const cursorPos = calculateCursorPosition(e.clientX, e.clientY, newViewport);
+        clientRef.current.publish({
+          destination: '/app/cursors',
+          body: JSON.stringify({
+            username: usernameRef.current,
+            x: cursorPos.x,
+            y: cursorPos.y
+          })
+        });
+      }
+
+      return newViewport;
+    });
+  };
+
+  // handleMouseMove 함수도 수정
   const handleMouseMove = (e) => {
     if (!usernameRef.current || !clientRef.current) return;
 
@@ -458,22 +534,14 @@ function App() {
       dragStart.current = { x: e.clientX, y: e.clientY };
     }
 
-    // 커서 위치 업데이트
-    const scaledCellSize = CELL_SIZE / viewport.zoom;
-    const totalCanvasWidth = CANVAS_SIZE * scaledCellSize;
-    const totalCanvasHeight = CANVAS_SIZE * scaledCellSize;
-    const offsetXCanvas = (window.innerWidth - totalCanvasWidth) / 2;
-    const offsetYCanvas = (window.innerHeight - totalCanvasHeight) / 2;
-
-    const canvasX = Math.floor((x - offsetXCanvas) / scaledCellSize + viewport.x);
-    const canvasY = Math.floor((y - offsetYCanvas) / scaledCellSize + viewport.y);
-
+    // 커서 위치 업데이트에 분리된 함수 사용
+    const cursorPos = calculateCursorPosition(e.clientX, e.clientY, viewport);
     clientRef.current.publish({
       destination: '/app/cursors',
       body: JSON.stringify({
         username: usernameRef.current,
-        x: canvasX,
-        y: canvasY
+        x: cursorPos.x,
+        y: cursorPos.y
       })
     });
   };
@@ -505,41 +573,6 @@ function App() {
       // 'dragging' 클래스를 main-canvas에서 제거
       mainCanvasRef.current.classList.remove('dragging');
     }
-  };
-
-  // handleWheel 함수 수정
-  const handleWheel = (e) => {
-    if (e.target.closest('.chat-section')) return;
-    
-    e.preventDefault();
-    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-    
-    setViewport((prev) => {
-      const rect = mainCanvasRef.current.getBoundingClientRect();
-      const scaledCellSize = CELL_SIZE / prev.zoom;
-      
-      // 마우스 위치를 캔버스 상의 좌표로 변환
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
-      
-      // 마우스 위치의 캔버스 좌표 계산
-      const pointX = mouseX / scaledCellSize + prev.x;
-      const pointY = mouseY / scaledCellSize + prev.y;
-      
-      // 새로운 줌 레벨
-      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev.zoom * zoomFactor));
-      const newScaledCellSize = CELL_SIZE / newZoom;
-      
-      // 새로운 뷰포트 위치 계산
-      const newX = pointX - mouseX / newScaledCellSize;
-      const newY = pointY - mouseY / newScaledCellSize;
-
-      return {
-        zoom: newZoom,
-        x: Math.max(-CANVAS_SIZE * 0.1, Math.min(CANVAS_SIZE * 1.1, newX)),
-        y: Math.max(-CANVAS_SIZE * 0.1, Math.min(CANVAS_SIZE * 1.1, newY))
-      };
-    });
   };
 
   const toggleChat = () => setIsChatVisible(!isChatVisible);

@@ -914,7 +914,7 @@ function App() {
               type="text"
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
-              placeholder="메시지를 입력��세요"
+              placeholder="메시지를 입력하세요"
               maxLength={200}
             />
             <button type="submit">전송</button>

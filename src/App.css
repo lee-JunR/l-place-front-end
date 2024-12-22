@@ -643,7 +643,7 @@
 
 .cursor {
   position: absolute;
-  z-index: 1000;
+  z-index: 50;
   display: flex;
   align-items: center;
   flex-direction: row;

@@ -135,7 +135,16 @@ function App() {
   
   useEffect(() => {
     fetchCanvasData();
-    usernameRef.current = getRandomNickname(type);
+    
+    // localStorage에서 닉네임 확인 또는 새로 생성
+    const savedUsername = localStorage.getItem('username');
+    if (savedUsername) {
+      usernameRef.current = savedUsername;
+    } else {
+      const newUsername = getRandomNickname(type);
+      usernameRef.current = newUsername;
+      localStorage.setItem('username', newUsername);
+    }
 
     // 화면 크기에 맞춰 초기 줌 레벨 계산
     const windowAspect = window.innerWidth / window.innerHeight;
@@ -672,7 +681,7 @@ function App() {
     };
   }, []);
 
-  // 채팅창 스크롤 이벤트 처리
+  // 채팅창 스크롤 이��트 처리
   const handleChatScroll = (e) => {
     e.stopPropagation(); // 이벤트 전파 중단
   };

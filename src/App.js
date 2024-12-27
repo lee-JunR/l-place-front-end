@@ -3,6 +3,7 @@ import SockJS from 'sockjs-client';
 import { Client } from '@stomp/stompjs';
 import { getRandomNickname } from '@woowa-babble/random-nickname';
 import './App.css';
+import { ChatIcon, ChatCloseIcon, PaletteIcon, UserIcon, PaletteToggleIcon } from './component/Icon';
 
 const COLOR_PALETTE = [
   '#000000', '#666666', '#0000ff', '#00ff00',
@@ -10,45 +11,6 @@ const COLOR_PALETTE = [
   '#ffffff', '#333333', '#00ffff', '#008000',
   '#ff69b4', '#ffd700', '#ff4500', 'custom'
 ];
-
-// App.js 상단에 SVG 아이콘 컴포넌트 추가
-const ChatIcon = () => (
-  <svg viewBox="0 0 24 24" fill="currentColor">
-    <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
-  </svg>
-);
-
-const ChatCloseIcon = () => (
-  <svg viewBox="0 0 24 24" fill="currentColor">
-    <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"/>
-  </svg>
-);
-
-const PaletteIcon = () => (
-  <svg viewBox="0 0 24 24" fill="currentColor">
-    <path d="M12 2C6.49 2 2 6.49 2 12s4.49 10 10 10c1.38 0 2.5-1.12 2.5-2.5 0-.61-.23-1.2-.64-1.67-.08-.1-.13-.21-.13-.33 0-.28.22-.5.5-.5H16c3.31 0 6-2.69 6-6 0-4.96-4.49-9-10-9zm5.5 11c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm-3-4c-.83 0-1.5-.67-1.5-1.5S13.67 6 14.5 6s1.5.67 1.5 1.5S15.33 9 14.5 9zM5 11.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5S7.33 13 6.5 13 5 12.33 5 11.5zm6-4c0 .83-.67 1.5-1.5 1.5S8 8.33 8 7.5 8.67 6 9.5 6s1.5.67 1.5 1.5z"/>
-  </svg>
-);
-
-// 사용자 아이콘 컴포넌트 추가
-const UserIcon = () => (
-  <svg viewBox="0 0 24 24" fill="currentColor">
-    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/>
-  </svg>
-);
-
-// 팔레트 토글 아이콘 추가
-const PaletteToggleIcon = () => (
-  <svg viewBox="0 0 24 24" fill="currentColor">
-    <path d="M12 8l-6 6 1.41 1.41L12 10.83l4.59 4.58L18 14z"/>
-  </svg>
-);
-
-// 상단에 랜덤 색상 생성 함수 추가
-const generateRandomColor = () => {
-  const hue = Math.floor(Math.random() * 360);
-  return `hsl(${hue}, 70%, 50%)`;
-};
 
 function App() {
   const CANVAS_SIZE = 256; // 캔버스 크기
@@ -86,7 +48,7 @@ function App() {
   const type = 'animals'; // animals, heroes, characters, monsters
 
 
-  // 초기 데이터 가져오기
+  // 초기 데이터 가��오기
   const fetchCanvasData = async () => {
     try {
       const response = await fetch(`${process.env.REACT_APP_BACKEND_API_URL}/api/canvas`);
@@ -317,7 +279,7 @@ function App() {
   };
 
   const handleMouseMove = (e) => {
-    if (!usernameRef.current || !clientRef.current) return;
+    if (!usernameRef.current || !clientRef.current || !clientRef.current.connected) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -328,12 +290,12 @@ function App() {
     const canvasY = Math.floor(y / (CELL_SIZE / viewport.zoom) + viewport.y);
 
     clientRef.current.publish({
-      destination: '/app/cursors',
-      body: JSON.stringify({
-        username: usernameRef.current,
-        x: canvasX,
-        y: canvasY
-      })
+        destination: '/app/cursors',
+        body: JSON.stringify({
+            username: usernameRef.current,
+            x: canvasX,
+            y: canvasY
+        })
     });
 
     if (!isDragging.current) return;
@@ -345,18 +307,18 @@ function App() {
     const dragSpeed = Math.max(0.5, Math.min(2, viewport.zoom));
     
     setViewport((prev) => {
-      const newX = prev.x - dx / (CELL_SIZE * dragSpeed);
-      const newY = prev.y - dy / (CELL_SIZE * dragSpeed);
-      
-      // 경계 확인
-      const maxX = CANVAS_SIZE - CANVAS_SIZE / prev.zoom + PADDING;
-      const maxY = CANVAS_SIZE - CANVAS_SIZE / prev.zoom + PADDING;
-      
-      return {
-        ...prev,
-        x: Math.max(-PADDING, Math.min(maxX, newX)),
-        y: Math.max(-PADDING, Math.min(maxY, newY))
-      };
+        const newX = prev.x - dx / (CELL_SIZE * dragSpeed);
+        const newY = prev.y - dy / (CELL_SIZE * dragSpeed);
+        
+        // 경계 확인
+        const maxX = CANVAS_SIZE - CANVAS_SIZE / prev.zoom + PADDING;
+        const maxY = CANVAS_SIZE - CANVAS_SIZE / prev.zoom + PADDING;
+        
+        return {
+            ...prev,
+            x: Math.max(-PADDING, Math.min(maxX, newX)),
+            y: Math.max(-PADDING, Math.min(maxY, newY))
+        };
     });
 
     dragStart.current = { x: e.clientX, y: e.clientY };
@@ -458,7 +420,7 @@ function App() {
         destination: '/app/chat/send',
         body: JSON.stringify(message),
       });
-      console.log('메시지 전송 완료');
+      console.log('메시지 전송 완���');
       setInputMessage('');
     }
   };
@@ -553,7 +515,7 @@ function App() {
           </div>
           <div className="username-modal-content">
             <p>
-              채팅에서 사용할 이름을 입력해주세요.<br />
+              ��팅에서 사용할 이름을 입력해주세요.<br />
               다른 사용자들에게 보여질 이름입니다.
             </p>
             <input

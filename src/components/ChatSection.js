@@ -1,6 +1,4 @@
-// src/components/ChatSection.js
-
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import { UserIcon } from './Icon';
 
 function ChatSection({
@@ -11,9 +9,17 @@ function ChatSection({
   onInputChange,
   onSendMessage,
   onChatScroll,
-  onUsernameClick,
-  chatContainerRef
+  onUsernameClick
 }) {
+  const chatContainerRef = useRef(null);
+
+  // 새 메시지가 올 때마다 자동 스크롤
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [messages]);
+
   return (
     <div 
       className={`chat-section ${!isChatVisible ? 'hidden' : ''}`}

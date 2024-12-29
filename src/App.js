@@ -2,8 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import SockJS from 'sockjs-client';
 import { Client } from '@stomp/stompjs';
 import { getRandomNickname } from '@woowa-babble/random-nickname';
+import { ChatIcon, ChatCloseIcon, PaletteIcon, UserIcon, PaletteToggleIcon } from './components/Icon';
+import UsernameModal from './components/UsernameModal';
+import ChatSection from './components/ChatSection';
 import './App.css';
-import { ChatIcon, ChatCloseIcon, PaletteIcon, UserIcon, PaletteToggleIcon } from './component/Icon';
 
 const COLOR_PALETTE = [
   '#000000', '#666666', '#0000ff', '#00ff00',
@@ -48,7 +50,7 @@ function App() {
   const type = 'animals'; // animals, heroes, characters, monsters
 
 
-  // 초기 데이터 가��오기
+  // 초기 데이터 가져오기
   const fetchCanvasData = async () => {
     try {
       const response = await fetch(`${process.env.REACT_APP_BACKEND_API_URL}/api/canvas`);
@@ -136,13 +138,13 @@ function App() {
             );
 
             if (isDuplicate) return prev;
-            return [...prev, chatMessage];
-          });          
+            return [...prev, chatMessage];          
           
-          // 새 메시지가 오면 자동 스크롤
-          if (chatContainerRef.current) {
-            chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-          }
+            // 새 메시지가 오면 자동 스크롤
+            if (chatContainerRef.current) {
+              chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+            }
+          });
         });
         subscriptions.add(chatSub);
 
@@ -269,7 +271,7 @@ function App() {
 
   useEffect(() => {
     renderCanvas();
-  }, [canvasData, viewport]);
+  }, [canvasData, viewport, renderCanvas]);
 
   const handleMouseDown = (e) => {
     if (e.button === 0) { // 좌클릭만 처리
@@ -413,16 +415,17 @@ function App() {
       timestamp: Date.now() 
     };
     
-    console.log('메시지 전송 도:', message);
-    
     if (clientRef.current?.connected) {
       clientRef.current.publish({
         destination: '/app/chat/send',
         body: JSON.stringify(message),
       });
-      console.log('메시지 전송 완���');
       setInputMessage('');
     }
+  };
+
+  const handleInputChange = (newValue) => {
+    setInputMessage(newValue);
   };
 
   // 캔버스 크기 설정을 위한 새로운 함수 추가
@@ -471,7 +474,7 @@ function App() {
 
   // 채팅창 스크롤 이벤트 처리
   const handleChatScroll = (e) => {
-    e.stopPropagation(); // 이벤트 전파 중단
+    e.stopPropagation();
   };
 
   // 색상 선택 처리 함수 추가
@@ -488,80 +491,22 @@ function App() {
     setIsPaletteVisible(!isPaletteVisible);
   };
 
-  // 사용자 이름 모달 컴포넌트 수정
-  const UsernameModal = () => {
-    const [tempUsername, setTempUsername] = useState(usernameRef.current);
-
-    const handleSubmit = () => {
-      if (tempUsername.trim()) {
-        usernameRef.current = tempUsername.trim();
-        setIsUsernameModalOpen(false);
-      }
-    };
-
-    const handleKeyPress = (e) => {
-      if (e.key === 'Enter') {
-        handleSubmit();
-      }
-    };
-
-    return (
-      <>
-        <div className="modal-overlay" onClick={() => setIsUsernameModalOpen(false)} />
-        <div className="username-modal">
-          <div className="username-modal-header">
-            <UserIcon />
-            <h2>사용자 이름 설정</h2>
-          </div>
-          <div className="username-modal-content">
-            <p>
-              ��팅에서 사용할 이름을 입력해주세요.<br />
-              다른 사용자들에게 보여질 이름입니다.
-            </p>
-            <input
-              type="text"
-              value={tempUsername}
-              onChange={(e) => setTempUsername(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder="사용자 이름 입력 (2-20자)"
-              maxLength={20}
-              autoFocus
-            />
-          </div>
-          <div className="modal-buttons">
-            <button 
-              className="modal-button cancel"
-              onClick={() => setIsUsernameModalOpen(false)}
-            >
-              취소
-            </button>
-            <button 
-              className="modal-button confirm"
-              onClick={handleSubmit}
-            >
-              확인
-            </button>
-          </div>
-        </div>
-      </>
-    );
+  // 사용자 이름 관련 핸들러
+  const handleUsernameModalOpen = () => {
+    setIsUsernameModalOpen(true);
   };
 
-  const handleUsernameChange = (e) => {
-    const newUsername = e.target.value;
-    const oldUsername = usernameRef.current;
-    
-    // 기존 커서 데이터를 새 사용자 이름으로 이동
-    setCursors(prev => {
-      const newCursors = { ...prev };
-      if (prev[oldUsername]) {
-        newCursors[newUsername] = prev[oldUsername];
-        delete newCursors[oldUsername];
-      }
-      return newCursors;
-    });
-    
+  const handleUsernameModalClose = () => {
+    setIsUsernameModalOpen(false);
+  };
+
+  const handleUsernameChange = (newUsername) => {
     usernameRef.current = newUsername;
+  };
+
+  const generateRandomColor = () => {
+    // 랜덤 색상 생성 로직 추가
+    return `#${Math.floor(Math.random()*16777215).toString(16)}`;
   };
 
   return (
@@ -662,51 +607,25 @@ function App() {
         </div>
       </div>
 
-      <div 
-        className={`chat-section ${!isChatVisible ? 'hidden' : ''}`}
-        onWheel={handleChatScroll} // 채팅창 스크롤 이벤트 처리 추가
-      >
-        <div className="chat-header">
-          <div 
-            className="username-display"
-            onClick={() => setIsUsernameModalOpen(true)}
-          >
-            <UserIcon />
-            <span>{usernameRef.current || '사용자 이름 설정'}</span>
-          </div>
-        </div>
-        <div className="chat-messages" ref={chatContainerRef}>
-          {messages.map((msg, index) => (
-            <div 
-              key={index} 
-              className={`message ${msg.sender === usernameRef.current ? 'own-message' : ''}`}
-            >
-              <span className="sender">{msg.sender}</span>
-              <span className="content">{msg.content}</span>
-              <span className="timestamp">
-                {new Date(msg.timestamp).toLocaleTimeString([], { 
-                  hour: '2-digit', 
-                  minute: '2-digit' 
-                })}
-              </span>
-            </div>
-          ))}
-        </div>
-        <div className="chat-input">
-          <form onSubmit={handleSendMessage}>
-            <input
-              type="text"
-              value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
-              placeholder="메시지를 입력하세요"
-              maxLength={200}
-            />
-            <button type="submit">전송</button>
-          </form>
-        </div>
-      </div>
+      <ChatSection
+        isChatVisible={isChatVisible}
+        username={usernameRef.current}
+        messages={messages}
+        inputMessage={inputMessage}
+        onInputChange={handleInputChange}
+        onSendMessage={handleSendMessage}
+        onChatScroll={handleChatScroll}
+        onUsernameClick={handleUsernameModalOpen}
+        chatContainerRef={chatContainerRef}
+      />
 
-      {isUsernameModalOpen && <UsernameModal />}
+      {isUsernameModalOpen && (
+        <UsernameModal
+          initialUsername={usernameRef.current}
+          onClose={handleUsernameModalClose}
+          onUsernameChange={handleUsernameChange}
+        />
+      )}
     </div>
   );
 }

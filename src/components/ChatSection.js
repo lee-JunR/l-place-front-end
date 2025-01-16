@@ -35,6 +35,7 @@ function ChatSection({
           <div 
             key={index} 
             className={`message ${msg.sender === username ? 'own-message' : ''}`}
+            style={{ whiteSpace: 'pre' }}
           >
             <span className="sender">{msg.sender}</span>
             <span className="content">{msg.content}</span>
@@ -48,7 +49,11 @@ function ChatSection({
         ))}
       </div>
       <div className="chat-input">
-        <form onSubmit={onSendMessage}>
+        <form onSubmit={onSendMessage} onKeyDown={(e) => {
+          if (e.key === ' ' && document.activeElement !== e.target) {
+            e.preventDefault(); // 입력 필드가 아닐 때 스페이스바 기본 동작 방지
+          }
+        }}>
           <input
             type="text"
             value={inputMessage}

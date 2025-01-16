@@ -3,7 +3,9 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import SockJS from 'sockjs-client';
 import { Client } from '@stomp/stompjs';
 import { getRandomNickname } from '@woowa-babble/random-nickname';
+import { fetchCanvasData, updatePixel } from './services/apiService';
 import './App.css';
+import useWebSocket from './hooks/useWebSocket';
 
 // 하위 컴포넌트 import
 import Toolbar from './components/Toolbar';
@@ -16,10 +18,6 @@ const CANVAS_SIZE = 256; // 캔버스 크기
 const CELL_SIZE = 16;    // 셀 크기
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 4;
-
-// 재연결 관련 상수
-const RECONNECT_DELAY = 5000;
-const MAX_RECONNECT_ATTEMPTS = 5;
 
 // 사용할 색상 팔레트
 const COLOR_PALETTE = [
@@ -67,7 +65,6 @@ function App() {
   // 닉네임, STOMP 클라이언트, 캔버스 참조
   const usernameRef = useRef('');
   const mainCanvasRef = useRef(null);
-  const clientRef = useRef(null);
 
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
@@ -75,38 +72,9 @@ function App() {
   // ------------------
   // 초기 데이터 가져오기
   // ------------------
-  const fetchCanvasData = async () => {
+  const fetchData = async () => {
     try {
-      // 실제 백엔드 API 경로로 수정
-      const response = await fetch('http://localhost:8080/api/canvas', {
-        headers: { 'Cache-Control': 'no-cache' },
-      });
-      if (!response.ok) throw new Error('캔버스 데이터 가져오기 실패');
-
-      const pixels = await response.json();
-
-      const initialCanvas = Array.from({ length: CANVAS_SIZE }, (_, y) =>
-        Array.from({ length: CANVAS_SIZE }, (_, x) => ({
-          x,
-          y,
-          color: '#FFFFFF',
-        }))
-      );
-
-      pixels.forEach(pixel => {
-        if (
-          pixel &&
-          pixel.x >= 0 && pixel.x < CANVAS_SIZE &&
-          pixel.y >= 0 && pixel.y < CANVAS_SIZE
-        ) {
-          initialCanvas[pixel.y][pixel.x] = {
-            x: pixel.x,
-            y: pixel.y,
-            color: pixel.color,
-          };
-        }
-      });
-
+      const initialCanvas = await fetchCanvasData(CANVAS_SIZE);
       setCanvasData(initialCanvas);
     } catch (error) {
       console.error('캔버스 데이터 가져오기 오류:', error);
@@ -117,7 +85,7 @@ function App() {
   // 마운트 시점 초기화
   // ------------------
   useEffect(() => {
-    fetchCanvasData();
+    fetchData();
 
     // 닉네임 설정
     const savedUsername = localStorage.getItem('username');
@@ -135,33 +103,23 @@ function App() {
 
     let initialZoom;
     if (windowAspect > canvasAspect) {
-      // 화면이 더 넓은 경우 -> 높이에 맞춤
       initialZoom = window.innerHeight / (CANVAS_SIZE * CELL_SIZE);
     } else {
-      // 화면이 더 좁은 경우 -> 너비에 맞춤
       initialZoom = window.innerWidth / (CANVAS_SIZE * CELL_SIZE);
     }
     initialZoom *= 0.9;
     initialZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, initialZoom));
 
-    // 중앙 정렬
     const centerX = (CANVAS_SIZE - window.innerWidth / (CELL_SIZE * initialZoom)) / 2;
     const centerY = (CANVAS_SIZE - window.innerHeight / (CELL_SIZE * initialZoom)) / 2;
     setViewport({ x: centerX, y: centerY, zoom: initialZoom });
   }, []);
 
-  // ------------------
-  // WebSocket 연결
-  // ------------------
-  useEffect(() => {
-    let stompClient = null;
-    let subscriptions = new Set();
-    let reconnectAttempts = 0;
-    let reconnectTimeout = null;
-
-    const handleCanvasMessage = (message) => {
+  // WebSocket 관련 로직을 useWebSocket 훅으로 대체
+  const { clientRef } = useWebSocket({
+    onCanvasMessage: (message) => {
       try {
-        const pixelData = JSON.parse(message.body);
+        const pixelData = message;
         if (
           pixelData &&
           typeof pixelData.x === 'number' &&
@@ -181,13 +139,11 @@ function App() {
       } catch (error) {
         console.error('캔버스 메시지 처리 오류:', error);
       }
-    };
-
-    const handleChatMessage = (message) => {
+    },
+    onChatMessage: (message) => {
       try {
-        const chatMessage = JSON.parse(message.body);
+        const chatMessage = message;
         setMessages(prev => {
-          // 중복 메시지 필터
           const isDuplicate = prev.some(msg =>
             msg.sender === chatMessage.sender &&
             msg.content === chatMessage.content &&
@@ -199,11 +155,10 @@ function App() {
       } catch (error) {
         console.error('채팅 메시지 처리 오류:', error);
       }
-    };
-
-    const handleCursorMessage = (message) => {
+    },
+    onCursorMessage: (message) => {
       try {
-        const cursorData = JSON.parse(message.body);
+        const cursorData = message;
         setCursors(prev => ({
           ...prev,
           [cursorData.username]: {
@@ -216,11 +171,10 @@ function App() {
       } catch (error) {
         console.error('커서 메시지 처리 오류:', error);
       }
-    };
-
-    const handleCursorRemoveMessage = (message) => {
+    },
+    onCursorRemoveMessage: (message) => {
       try {
-        const removedUsername = JSON.parse(message.body);
+        const removedUsername = message;
         setCursors(prev => {
           const newCursors = { ...prev };
           delete newCursors[removedUsername.username];
@@ -229,77 +183,11 @@ function App() {
       } catch (error) {
         console.error('커서 제거 메시지 처리 오류:', error);
       }
-    };
+    }
+  });
 
-    const connect = () => {
-      if (stompClient?.connected) {
-        console.log('이미 연결되어 있습니다.');
-        return;
-      }
-      try {
-        stompClient = new Client({
-          webSocketFactory: () => new SockJS('http://localhost:8080/ws'),
-          reconnectDelay: 0,
-          onConnect: () => {
-            console.log('WebSocket 연결 성공');
-            reconnectAttempts = 0;
-
-            subscriptions.forEach(sub => sub?.unsubscribe());
-            subscriptions.clear();
-
-            try {
-              const canvasSub = stompClient.subscribe('/topic/canvas', handleCanvasMessage);
-              const chatSub = stompClient.subscribe('/topic/chat', handleChatMessage);
-              const cursorSub = stompClient.subscribe('/topic/cursors', handleCursorMessage);
-              const cursorRemoveSub = stompClient.subscribe('/topic/cursors/remove', handleCursorRemoveMessage);
-
-              subscriptions.add(canvasSub);
-              subscriptions.add(chatSub);
-              subscriptions.add(cursorSub);
-              subscriptions.add(cursorRemoveSub);
-
-              clientRef.current = stompClient;
-            } catch (error) {
-              console.error('구독 설정 중 오류:', error);
-              handleDisconnect();
-            }
-          },
-          onStompError: (frame) => {
-            console.error('STOMP 오류:', frame);
-            handleDisconnect();
-          },
-          onWebSocketError: (event) => {
-            console.error('WebSocket 오류:', event);
-            handleDisconnect();
-          },
-          onDisconnect: () => {
-            console.log('WebSocket 연결 해제');
-            handleDisconnect();
-          }
-        });
-
-        stompClient.activate();
-      } catch (error) {
-        console.error('WebSocket 연결 시도 오류:', error);
-        handleDisconnect();
-      }
-    };
-
-    const handleDisconnect = () => {
-      clientRef.current = null;
-      if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-        reconnectAttempts++;
-        console.log(`재연결 시도 ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}`);
-        clearTimeout(reconnectTimeout);
-        reconnectTimeout = setTimeout(() => {
-          connect();
-        }, RECONNECT_DELAY);
-      } else {
-        console.error('최대 재연결 시도 횟수 초과');
-      }
-    };
-
-    // 페이지 가시성 변경 -> 커서 제거
+  // 페이지 가시성 변경 -> 커서 제거
+  useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden' && clientRef.current) {
         clientRef.current.publish({
@@ -309,19 +197,9 @@ function App() {
       }
     };
 
-    connect();
     document.addEventListener('visibilitychange', handleVisibilityChange);
-
     return () => {
-      clearTimeout(reconnectTimeout);
-      subscriptions.forEach(sub => sub.unsubscribe());
-      subscriptions.clear();
-
-      if (stompClient?.connected) {
-        stompClient.deactivate();
-      }
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      stompClient = null;
     };
   }, []);
 
@@ -496,22 +374,7 @@ function App() {
     if (clickedX >= 0 && clickedX < CANVAS_SIZE && clickedY >= 0 && clickedY < CANVAS_SIZE) {
       const pixelDTO = { x: clickedX, y: clickedY, color: selectedColor };
       try {
-        const response = await fetch('http://localhost:8080/api/pixel', {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Cache-Control': 'no-cache'
-          },
-          body: JSON.stringify(pixelDTO),
-        });
-        if (!response.ok) {
-          throw new Error('픽셀 업데이트 실패');
-        }
-
-        const text = await response.text();
-        if (!text) return; // 같은 색이면 서버가 빈 응답
-
-        const updatedPixel = JSON.parse(text);
+        const updatedPixel = await updatePixel(pixelDTO);
         if (updatedPixel) {
           setCanvasData(prevCanvas => {
             const newCanvas = prevCanvas.map(row => row.slice());
@@ -652,7 +515,7 @@ function App() {
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
         onCanvasClick={handleCanvasClick}
-        mainCanvasRef={mainCanvasRef} // ★ 여기서 ref를 넘김
+        mainCanvasRef={mainCanvasRef}
       />
 
       {/* 다른 사용자 커서 */}

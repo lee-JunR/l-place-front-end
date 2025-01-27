@@ -4,6 +4,7 @@ import { Client } from '@stomp/stompjs';
 
 const RECONNECT_DELAY = 5000;
 const MAX_RECONNECT_ATTEMPTS = 5;
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL;
 
 function useWebSocket({ onCanvasMessage, onChatMessage, onCursorMessage, onCursorRemoveMessage }) {
   const clientRef = useRef(null);
@@ -17,7 +18,7 @@ function useWebSocket({ onCanvasMessage, onChatMessage, onCursorMessage, onCurso
     }
 
     const stompClient = new Client({
-      webSocketFactory: () => new SockJS('http://localhost:8080/ws'),
+      webSocketFactory: () => new SockJS(`${API_BASE_URL}/ws`),
       reconnectDelay: 0,
       onConnect: () => {
         console.log('WebSocket 연결 성공');
